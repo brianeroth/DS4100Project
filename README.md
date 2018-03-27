@@ -9,11 +9,14 @@ The goal of this project is to determine if there are any correlations between a
 4. Spotify API credentials (client ID and client secret, available [here](https://developer.spotify.com))
 
 ## Getting setup
+### Data Collection
 1. Run the `create.sql` script in `db/`
 2. Run `npm install` in `data/`
 3. Run `cp .env.sample .env` in `/` and fill in the key values
 4. Run `node index.js` in `data/`
-5. TBD
+
+### Data Analysis
+TBD.
 
 ## Technical note on Spotify's API
 When pulling down data from the Spotify API, it's necessary to make several calls to different endpoints (for example, getting all of the playlists associated with Spotify's username, followed by a seperate call to get the playlist's follower counts, followed by another call to get the playlist's tracks, etc.).
