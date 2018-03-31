@@ -1,3 +1,6 @@
 node_modules/
 .env
+
+# Text files not associated with the actual project
 Project Proposal.gdoc
+Rubric.gsheet

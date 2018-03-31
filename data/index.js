@@ -91,7 +91,7 @@ function pullTracksForPlaylist(playlist, offset, tracks) {
         for (var i = 0; i < trackList.length; i++) {
           var t = trackList[i].track;
           connection.query("INSERT INTO tracks (id, name, popularity, album, artists, duration_in_ms, explicit) VALUES (?, ?, ?, ?, ?, ?, ?)", [t.id, t.name, t.popularity, t.album.name, t.album.artists[0].name, t.duration_ms, t.explicit], function(error, results, fields) {});
-          connection.query("INSERT INTO tracks_to_playlists (playlist_id, track_id) VALUES (?, ?)", [t.id, playlist.id], function(error, results, fields) {});
+          connection.query("INSERT INTO tracks_to_playlists (playlist_id, track_id) VALUES (?, ?)", [playlist.id, t.id], function(error, results, fields) {});
         }
       }
     }).catch(e => {
