@@ -15,7 +15,7 @@ var spotifyApi = new SpotifyWebApi({
 const PLAYLIST_LIMIT = 50; // the maximum number of playlists we can pull per API request
 const TRACK_LIMIT = 100; // the maximum number of tracks we can pull per API request
 const SPOTIFY_USERNAME = "spotify"; // Spotify's username on Spotify
-const THROTTLE_MS = 1000;
+const THROTTLE_MS = 300;
 
 /**
  * Utility function to throttle promises by x milliseconds
@@ -108,7 +108,7 @@ function pullTracksForPlaylist(playlist, offset, tracks) {
  * Get audio features for a single track
  */
 function pullAudioFeaturesForTrack(track) {
-  return Promise.resolve().then(sleeper(1000)).then(() => {
+  return Promise.resolve().then(sleeper(THROTTLE_MS)).then(() => {
     spotifyApi.getAudioFeaturesForTrack(track.id).then(data => {
       console.log("Pulling audio features for track " + track.id);
       var f = data.body;
