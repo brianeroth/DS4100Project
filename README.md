@@ -16,7 +16,7 @@ The goal of this project is to determine if there are any correlations between a
 4. Run `node index.js` in `data/`
 
 ### Data Analysis
-TBD.
+All of the analysis is contained in the `analysis` directory.
 
 ## Technical note on Spotify's API
 When pulling down data from the Spotify API, it's necessary to make several calls to different endpoints (for example, getting all of the playlists associated with Spotify's username, followed by a seperate call to get the playlist's follower counts, followed by another call to get the playlist's tracks, etc.).
