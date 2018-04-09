@@ -4,3 +4,6 @@ node_modules/
 # Text files not associated with the actual project
 Project Proposal.gdoc
 Rubric.gsheet
+
+# MySQL dump of the database
+data/dump.sql

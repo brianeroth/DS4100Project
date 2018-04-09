@@ -56,23 +56,19 @@ function insertPlaylistsIntoDB(playlists) {
  */
 function pullFollowerCounts(playlist) {
   return Promise.resolve().then(sleeper(THROTTLE_MS)).then(() => {
-    spotifyApi.clientCredentialsGrant().then(data => {
-      spotifyApi.setAccessToken(data.body["access_token"]);
-    }).then(() => {
-      spotifyApi.getPlaylist(SPOTIFY_USERNAME, playlist.id).then(data => {
-        console.log("Pulling playlist " + playlist.id);
-        return {
-          id: playlist.id,
-          count: data.body.followers.total
-        };
-      }).then(o => {
-        connection.query("UPDATE playlists SET followers = ? WHERE id = ?", [o.count, o.id], function(error, results, fields) {});
-      }).catch(e => {
-        console.log(e);
-        Promise.reject();
-      });
-    })
-  });
+    spotifyApi.getPlaylist(SPOTIFY_USERNAME, playlist.id).then(data => {
+      console.log("Pulling playlist " + playlist.id);
+      return {
+        id: playlist.id,
+        count: data.body.followers.total
+      };
+    }).then(o => {
+      connection.query("UPDATE playlists SET followers = ? WHERE id = ?", [o.count, o.id], function(error, results, fields) {});
+    }).catch(e => {
+      console.log(e);
+      Promise.reject();
+    });
+  })
 }
 
 /**
