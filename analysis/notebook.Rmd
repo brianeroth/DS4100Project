@@ -1,5 +1,6 @@
 ---
 title: "Notebook"
+author: "Brian Roth"
 output: html_notebook
 ---
 
@@ -309,7 +310,7 @@ lrMAE <- print(paste("MAE:", mean(abs(idealLinearModelPred - modelFrames$test$fo
 ```
 
 ## k-Nearest Neighbors
-The k-nearest neighors (kNN) algorithm for regression attempts to output a predicted value (in our case, of follower counts for a playlist) based on distances between variables in the regression model. We'll run a kNN regression across all variables in our data set to predict the logarithmic follower count for playlists. As usual, the model will be trained using the training set, and a prediction will be run on the test data set to see how accurate the model is.
+The k-nearest neighbors (kNN) algorithm for regression attempts to output a predicted value (in our case, of follower counts for a playlist) based on distances between variables in the regression model. We'll run a kNN regression across all variables in our data set to predict the logarithmic follower count for playlists. As usual, the model will be trained using the training set, and a prediction will be run on the test data set to see how accurate the model is.
 
 The algorithm finds an optimal k-value of 43. This value of k was determined by the algorithm as the optimal k-value after performing cross validation across several different possible k-values. This k-value leads to the smallest amount of error in predicting the correct follower count.
 ```{r}
@@ -333,7 +334,7 @@ knnMAE <- print(paste("MAE:", mean(abs(knnPredict - modelFrames$test$followers))
 ## Random Forest
 The random forest algorithm for regression attempts to predict some output (in our case, of follower counts for a playlist) by binning predicted data by creating a tree. The random forest's leaf nodes become the predicted value. Random forests are especially useful for and good predictors with non-categorical features (like the follower counts that we are working with).
 
-To run this algorithm, we will create a random forest with 100 trees, and also analyze the "importantance" of each variable, meaning how critical its inclusion is to creating a better predicting tree. 
+To run this algorithm, we will create a random forest with 100 trees, and also analyze the "importance" of each variable, meaning how critical its inclusion is to creating a better predicting tree. 
 
 The random forest finds that the three most important variables are: 1) duration_in_ms, 2) danceability, and 3) valence. This is an interesting result, given the context of our linear regression model, which also found that danceability and valence are significant. Although unlike the linear regression, which found speechiness to be significant, the random forest found duration of a song to be the most "important" variable. 
 ```{r}
@@ -408,3 +409,10 @@ As expected with the data, the random forest and kNN plots are essentially ident
 The more interesting graph is the linear regression plot. The plot above shows significantly more playlists sitting towards the trendline, which means that the linear regression model was able to more accurately predict their follower counts. The linear regression model seems to still have failed significantly on playlists that very high follower counts, as seen by the few outliers in the top and bottom right hand sides of the plot, but was able to do a relatively good job at predicting playlist follower counts in the low-to-medium range. 
 
 ## Conclusion
+The goal of this project was to determine if there are any correlations between the type of tracks in a playlist and the follower count of that playlist on Spotify. To begin, we pulled down almost 1700 playlists using the Spotify API, stored the data in a MySQL database, and imported it into R for analysis. We began by performing some exploratory data plots, and then created three different types of regression models for predicting the follower counts of playlists based on the track audio features.
+
+We found that there are three statistically significant variables in our model: 1) danceability, 2) valence, and 3) speechiness. One can almost assume that the first two would be significant influencers on a playlist's follower count, since the happier sounding tracks are likely to gain more followers since that's what most people enjoy listening to. 
+
+It also turns out that out of the three models and predictions we can, multiple linear regression with back-fitting of regression parameters was the most accurate at predicting follower counts (granted, not with playlists that have very high follower counts). The kNN and random forest algorithms were almost identical at prediction accuracy, but neither were that good. 
+
+In the future, one could expand this project to inlcude more factors like artists, track genres, etc. in determining if there are any other statistically significant variables that can predict playlist follower counts. 

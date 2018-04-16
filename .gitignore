@@ -4,7 +4,7 @@ node_modules/
 # Text files not associated with the actual project
 Project Proposal.gdoc
 Rubric.gsheet
+Presentation.gslides
 
 # RStudio files
-analysis/.RData
-analysis/.RHistory
+analysis/.R*
