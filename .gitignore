@@ -5,5 +5,6 @@ node_modules/
 Project Proposal.gdoc
 Rubric.gsheet
 
-# MySQL dump of the database
-data/dump.sql
+# RStudio files
+analysis/.RData
+analysis/.RHistory

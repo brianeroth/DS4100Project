@@ -4,10 +4,12 @@ output: html_notebook
 ---
 
 ## Project Description
-The goal of this project is to determine if there are any correlations between a Spotify playlist's follower count and the audio features (danceability, energy, instrumentalness, etc.) of the tracks inside the playlist. 
+The goal of this project is to determine if there are any correlations between a Spotify playlist's follower count and the audio features (danceability, energy, instrumentalness, etc.) of the tracks inside the playlist. The analysis will include initial exploratory data plots to understand the data set at a high-level overview, followed by the construction of several regression models, concluded by an analysis of the models to decide which one is able to predict follower counts best.
+
+The models that will be constructed are: 1) multiple linear regression, 2) k-Nearest Neighbors, and 3) random forest. 
 
 ## Explanation of Data
-There are four main data sets that we'll be working with. 
+There are four main data sets that we'll be working with. The data was gathered using Spotify's public API via an external Node.js script. The data has been stored in a MySQL database, and will be retrieved here in R from the database. 
 
 **1. Set of all playlists that have been curated by Spotify (user id: "Spotify")**
 
@@ -21,15 +23,21 @@ Since it is possible for the same track to be included in more than one playlist
 
 **4. Audio features for every track that is inside a playlist curated by Spotify**
 
-Most tracks on Spotify have an associated list of "audio features", which are normalized values between 0 and 1 (with the exception of musical key, which is based on a mapping of key to integer). Audio features include: danceability, loudness, temp, etc. A detailed description of each of the audio features is available on Spotify's developer website [here](https://developer.spotify.com/web-api/get-audio-features/).
+Most tracks on Spotify have an associated list of "audio features", which are normalized values between 0 and 1 (with the exception of musical key, which is based on a mapping of key to integer). Audio features include: danceability, loudness, tempo, etc. A detailed description of each of the audio features is available on Spotify's developer website [here](https://developer.spotify.com/web-api/get-audio-features/).
 
-The following block of code will initialize all the libraries that will be used in this R Notebook. The libraries will allow us to pull data from our MySQL database, and do some data analysis.
-```{r}
+The following block of code will initialize all the libraries that will be used in this R Notebook. The libraries will allow us to pull data from our MySQL database, and perform analysis on our data.
+```{r message=FALSE, warning=FALSE}
 # Initialize all libraries
 library(RMySQL)
+library(caret)
+library(randomForest)
+library(corrplot)
+library(tidyr)
+library(scales)
 ```
 
-The following block of code creates a connection to the MySQL database. Note that you may need to change some of the values below depending on your MySQL setup, and possibly add a `password` parameter as well.
+## Database Imports
+The following block of code creates a connection to the MySQL database. Note that you may need to change some of the values below depending on your local MySQL setup, and possibly add a `password` parameter as well to connect to the database.
 ```{r}
 # Initialize a connection to the MySQL database
 dbConnection <- dbConnect(
@@ -48,7 +56,9 @@ if (!exists("playlists")) {
 }
 ```
 
-The following block of code will retrieve all rows from the `tracks` table in the database, join it with the `track_audio_features` table in the database, and store it in a data frame called `tracks`. Note that this block only runs if the `tracks` variable doesn't already exist in the global environment. This will give us access to all of the unique tracks across our data set, along with the audio features for every track. Note that if a track doesn't have audio features stored in the database, it won't be included in this data frame.
+The following block of code will retrieve all rows from the `tracks` table in the database, join it with the `track_audio_features` table in the database, and store it in a data frame called `tracks`. Note that this block only runs if the `tracks` variable doesn't already exist in the global environment. 
+
+This will give us access to all of the unique tracks across our data set, along with the audio features for every track. Note that if a track doesn't have audio features stored in the database, it won't be included in this data frame.
 ```{r warning=FALSE}
 if (!exists("tracks")) {
   dbQuery <- dbSendQuery(dbConnection, "SELECT * FROM tracks JOIN track_audio_features WHERE tracks.id = track_audio_features.id")
@@ -65,20 +75,20 @@ df <- fetch(dbQuery, n = -1) # n = -1 to override RMySQL's default behavior of r
 ```
 
 ## Exploratory data plots
-Let's begin by simply taking a look at some basic data plots exploration. This will give us a better idea of the range of data we're working with, and allow us to shape the next step of the pipeline, which is data cleaning and shaping. 
+Let's begin by simply taking a look at some basic data plots exploration. This will give us a better idea of the range of data we're working with, and allow us to shape the next step of the pipeline, which is data cleaning and normalization. 
 
 First, the following will determine how many playlists we have pulled from our database (and thus, the Spotify API).
 ```{r}
 print(paste("We have", nrow(playlists), "saved playlists."))
 ```
 
-Next, let's determine the mean and median follower counts for our playlists. It doesn't really make sense to calculate the mode here, since there's such variability in the follower counts.
+Next, let's determine the mean and median follower counts for our playlists. It doesn't really make sense to calculate the mode here, since there's such great variability in the follower counts.
 ```{r}
 print(paste("The mean follower count is", mean(playlists$followers, na.rm = TRUE)))
 print(paste("The median follower count is", median(playlists$followers, na.rm = TRUE)))
 ```
 
-Now, let's find out what the highest follower count is across our data set. We also determine here the number of playlists that are missing a follower count. It's important to note that it is possible that these playlists have either 0 followers, or Spotify's API failed to return any value for follower count. Unfortunately, it's not possible for us to know which of these cases it is for a given playlists, so these missing values are something we'll need to deal with in the data shaping stage. This information might also be useful later on in the detection of outliers.
+Now, let's find out what the highest follower count is across our data set. We also determine here the number of playlists that are missing a follower count. It's important to note that it is possible that these playlists have either 0 followers, or Spotify's API failed to return any value for follower count. Unfortunately, it's not possible for us to know which of these cases it is for a given playlist, so these missing values are something we'll need to deal with in the data shaping stage. This information might also be useful later on in the detection of outliers.
 ```{r}
 highestFollowerCount <- playlists[which.max(playlists$followers), ]
 print(paste("The highest follower count is", highestFollowerCount$followers,". It is playlist id", highestFollowerCount$id, "titled", highestFollowerCount$name))
@@ -86,7 +96,7 @@ print(paste("The highest follower count is", highestFollowerCount$followers,". I
 print(paste("Meanwhile, there are", nrow(playlists[is.na(playlists$followers), ]), "playlists with a missing follower count."))
 ```
 
-Switching over to tracks, let's see how many total across all playlists we have. Note that these are the unique tracks, since more than one playlist might contain the same track. As stated earlier, this count also takes into account that we're only going to work with tracks that have audio features (which is almost all of the unique tracks in our data set).
+Switching over to tracks, let's see how many total across all playlists we have. Note that these are the unique tracks, since more than one playlist might contain the same track. As stated earlier, this count also takes into account that we're only going to work with tracks that have audio features (which is almost all of the unique tracks in our data set, but not all).
 ```{r}
 print(paste("There is a total of", nrow(tracks), "tracks (with audio features)."))
 ```
@@ -103,12 +113,14 @@ hist(
 )
 ```
 
+## Collapsing Data
 The following code is extremely critical to the rest of the analysis. Our current data frame `df` contains track audio features at the track level. This isn't helpful to us since our goal is to look at follower count correlations at the playlists level, so we need a way to collapse our track audio data to the playlist level. 
 
-In order to do this, we run a mean aggregation across all of the qualatative features inside `df`, that is, the columns related to the track audio features (danceability, energy, etc.), and collapse on `playlist_id`. 
+In order to do this, we run a mean aggregation across all of the quantitative features inside `df`, that is, the columns related to the track audio features (danceability, energy, etc.), and collapse on `playlist_id`. 
 
 This will leave us with a data frame whose row count is almost equal to the number of playlists we have in our data set. It's not exactly equal because some playlists might not have any tracks associated with them in our data set. We can now perform analysis of the track audio features at a playlist level.
 ```{r}
+# Playlist ID, followers, and name won't be collapsed on
 aggregateDF <- aggregate(
   cbind(danceability, energy, integer_key, loudness, mode, speechiness, instrumentalness, liveness, valence, tempo, duration_in_ms) ~ playlist_id + followers + name,
   data = df, 
@@ -117,11 +129,13 @@ aggregateDF <- aggregate(
 ```
 
 ## Standardization
-Next, let's standardize our follower counts in order to detect any outliers. First, we're going to eliminate any playlists with follower counts of 0 or `NA`, since these are not indicative of the majority of playlists in our data set. There are several factors that could contribute to this value for follower counts, including Spotify API limitations, so it's easier to remove instead of impute.
+Next, let's standardize our follower counts in order to detect any outliers. First, we're going to eliminate any playlists with follower counts of 0 or `NA`, since these are not indicative of the majority of playlists in our data set. There are several factors that could contribute to this value for follower counts, including Spotify API limitations, so it's easier to remove these from our data set instead of impute.
 
 In order to standardize, we'll run a simple z-score across the data set and store it in a new column called "standardizedFollowers." Then, we'll detect outliers by finding and removing any rows that have `abs(standardizedFollowers)` >= 3.
 
 There's a lot of possible explanations as to why these playlists have such high follower counts (or, low follower counts). For example, Spotify could be heavily marketing these playlists to users, so follower counts would be artificially high. It's also possible that there is some correlation between the types of tracks in these playlists and the follower count, but we'll save that for analysis later.
+
+Note that this code block will only run if we haven't already run the standardization code on the data frame (to avoid some strange issues with double standardizing the same column).
 ```{r}
 if (!"standardizedFollowers" %in% colnames(aggregateDF)) {
   aggregateDF$standardizedFollowers <- scale(aggregateDF$followers)
@@ -132,17 +146,104 @@ if (!"standardizedFollowers" %in% colnames(aggregateDF)) {
 }
 ```
 
-## Correlation analysis
-Next, we'll run a linear regression to detect a correlation between follower count across all available variables (danceability + energy + integer_key + loudness + mode + speechiness + instrumentalness + liveness + valence + tempo) for the qualatative features of that playlist. 
+There are four other variables that we need to standardize between 0 and 1 in our data set. Let's do that now using the `rescale()` function. Instead of storing the standardized features in a new column, we'll simply replace the current value with the standardized value in the data frame.
+```{r}
+aggregateDF$integer_key <- rescale(aggregateDF$integer_key)
+aggregateDF$loudness <- rescale(aggregateDF$loudness)
+aggregateDF$tempo <- rescale(aggregateDF$tempo)
+aggregateDF$duration_in_ms <- rescale(aggregateDF$duration_in_ms)
+```
 
-The regression finds some interesting results. It finds that there is a very strong correlation between follower counts and the following variables: danceability, speechiness, and valence. It also finds that there is a slight correlation between follower counts and the temp variable. The remaining variables are statistically insignificant in the correlation. 
+## Correlation Analysis
+To begin analyizing our data, we'll run a correlation test to create a correlation matrix. This will allow us to determine which variables in our data set correlate to another variable (or multiple variables). We'll be using a Pearson correlation here, since it's better than Spearman for continuous variables like the ones we are working with.
+
+The plot below is an upper triangular matrix. Dark blue circles signal a strong correlation, while dark orange indicates no correlation between the two variables. We could spend some time describing all of the correlations below, but some important ones to point out are: (1) strong correlations between danceability and valence, tempo and energy, energy and loudness, and tempo and loudness, (2) low to no correlation between danceability and instrumentalness, valence and instrumentalness, and loudness and instrumentalness. Note that the diagonal of the correlation matrix is dark blue, since those are the columns/rows where the variables match up with each other, so there would obviously be a strong correlation there.
+
+One should actually expect to see results like the ones we found. For instance, it's likely that the danceability of a song will be lower if it is more instrumental, and similarly with valence and loudness. On the other hand, variables like danceability and valence are strongly correlated because songs are more likely to be danceable if they are happy-sounding (valence scale).
+```{r}
+correlationMatrix <- cor(
+  aggregateDF[c(4:14)], 
+  method = "pearson", 
+  use = "complete.obs"
+)
+corrplot(
+  correlationMatrix, 
+  type = "upper", 
+  order = "hclust"
+)
+```
+
+## Generation of training, test, and validation data sets
+The first necessary step before constructing different models and evaluating them is to split our data set into training, validation, and test data sets. The training set will be comprised of 60% of our data set, and the test and validation will make up the remaining 40% evenly. The training set will be used to train our models. The validation set will be used to tune our model, and the test set will be used to test our model against the remaining rows of data.
+```{r}
+# Adapted from https://stackoverflow.com/questions/36068963/r-how-to-split-a-data-frame-into-training-validation-and-test-sets
+spec <- c(train = 0.6, test = 0.2, validate = 0.2)
+
+g <- sample(cut(
+  seq(nrow(aggregateDF)), 
+  nrow(aggregateDF)*cumsum(c(0,spec)),
+  labels = names(spec)
+))
+
+modelFrames <- split(aggregateDF, g)
+```
+
+## Baseline Model
+Before we begin with more advanced models, let's take a look at the baseline model. The baseline model will be computed by taking the mean follower across in our training data set, and then calculating the RMSE and MAE on the test data. 
+
+Both the RMSE and MAE are relatively significantly different than what we expected to be the follower count, so this isn't a good model to use for prediction. Let's try another model.
+```{r}
+baselineFollowers <- mean(modelFrames$train$followers)
+print(paste("Mean follower count of the training set:", baselineFollowers))
+baselineRMSE <- print(paste("RMSE:", sqrt(mean((baselineFollowers - modelFrames$test$followers)^2))))
+baselineMAE <- print(paste("MAE:", mean(abs(baselineFollowers - modelFrames$test$followers))))
+```
+
+## Linear Regression
+Next, we'll run a linear regression on our training set to detect a correlation between follower count across all available variables (danceability + energy + integer_key + loudness + mode + speechiness + instrumentalness + liveness + valence + tempo + duration_in_ms) for the quantitative features of that playlist. Note that we are going to use the log(followers) in the `lm()` function, since our data is skewed to the right and to get more reasonable follower count numbers.
+
+We'll also utilize the tactic of back-fitting of regression parameters, which calls for us to remove the least-significant variable in each `lm()` until the only remaining variables are statistically significant. The final iteration of the linear model is our ideal model, with statistically significant variables included.
+
+The regression finds some interesting results. It finds that there is a strong correlation between follower counts and the following variables: danceability and valence. It also finds that there is a correlation between follower counts and speechiness of a track.
 ```{r}
 linearModel <- lm(
-  formula = followers ~ danceability + energy + integer_key + loudness + mode + speechiness + instrumentalness + liveness + valence + tempo + duration_in_ms,
-  data = aggregateDF
+  formula = log(followers) ~ danceability + energy + integer_key + loudness + mode + speechiness + instrumentalness + liveness + valence + tempo + duration_in_ms,
+  data = modelFrames$train
+)
+linearModel <- lm(
+  formula = log(followers) ~ danceability + energy + integer_key + loudness + mode + speechiness + instrumentalness + liveness + valence + tempo,
+  data = modelFrames$train
+)
+linearModel <- lm(
+  formula = log(followers) ~ danceability + energy + integer_key + loudness + mode + speechiness + liveness + valence + tempo,
+  data = modelFrames$train
+)
+linearModel <- lm(
+  formula = log(followers) ~ danceability + energy + integer_key + mode + speechiness + liveness + valence + tempo,
+  data = modelFrames$train
+)
+linearModel <- lm(
+  formula = log(followers) ~ danceability + energy + integer_key + mode + speechiness + liveness + valence,
+  data = modelFrames$train
+)
+linearModel <- lm(
+  formula = log(followers) ~ danceability + integer_key + mode + speechiness + liveness + valence,
+  data = modelFrames$train
+)
+linearModel <- lm(
+  formula = log(followers) ~ danceability + integer_key + mode + speechiness + valence,
+  data = modelFrames$train
+)
+linearModel <- lm(
+  formula = log(followers) ~ danceability + integer_key + speechiness + valence,
+  data = modelFrames$train
+)
+idealLinearModel <- lm(
+  formula = log(followers) ~ danceability + speechiness + valence,
+  data = modelFrames$train
 )
 
-summary(linearModel)
+summary(idealLinearModel)
 ```
 
 The following is Spotify's description of the statistically significant audio features:
@@ -156,12 +257,11 @@ The following is Spotify's description of the statistically significant audio fe
 ### Speechiness
 > Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value. Values above 0.66 describe tracks that are probably made entirely of spoken words. Values between 0.33 and 0.66 describe tracks that may contain both music and speech, either in sections or layered, including such cases as rap music. Values below 0.33 most likely represent music and other non-speech-like tracks.
 
-### Tempo
-> The overall estimated tempo of a track in beats per minute (BPM). In musical terminology, tempo is the speed or pace of a given piece and derives directly from the average beat duration.
+Now we'll take a closer look at each of these significant variables to understand what's going on. 
 
-Now we'll take a closer look at each of these significant variables to understand what's going on. Let's create a plot for valence vs. follower count (again, in a logarithmic base). The x-axis here will be the follower count, and the y-axis will be the average valence for that playlist.
+Let's create a plot for valence vs. follower count (again, in a logarithmic base). The x-axis here will be the follower count, and the y-axis will be the average valence for that playlist.
 
-We can see that the points in the plot are mostly concentrated to the right of the graph, and in the middle-high end of the y-axis. This means that most playlists with higher follower counts mostly contain tracks that have valence levels >= 0.5. According to Spotify's documentation, this valence value correlates to happier sounding tracks. 
+We can see that the points in the plot are mostly concentrated to the right of the graph, and in the middle-high end of the y-axis. This means that most playlists with higher follower counts mostly contain tracks that have valence levels >= 0.5. According to Spotify's documentation, the valence value correlates to happier sounding tracks. One would guess that it makes sense that playlists with happier sounding tracks receive more followers/listeners.
 ```{r}
 plot(
   x = log(aggregateDF$followers),
@@ -174,7 +274,7 @@ plot(
 
 Let's create a plot for danceability vs. follower count (again, in a logarithmic base). The x-axis here will be the follower count, and the y-axis will be the average danceability for that playlist.
 
-We can see that the points in the plot are mostly concentrated in the top-right hand corner of the plot. This means that most playlists with higher follower counts contain tracks with mostly high danceability values (closer to 1.0). According to Spotify's documentation, this valence value correlates to highly danceable tracks. 
+We can see that the points in the plot are mostly concentrated in the top-right hand corner of the plot. This means that most playlists with higher follower counts contain tracks with mostly high danceability values (closer to 1.0). According to Spotify's documentation, this danceability value correlates to highly danceable tracks. One would guess that this makes sense because people enjoy danceable tracks and would listen to them more often that tracks that are less danceable. 
 
 It's also worth noting the few outliers on the plot, mostly concentrated to the bottom of the plot. These playlists have high follower counts, but very non-danceable tracks. 
 ```{r}
@@ -189,11 +289,7 @@ plot(
 
 Let's create a plot for speechiness vs. follower count (again, in a logarithmic base). The x-axis here will be the follower count, and the y-axis will be the average speechiness for that playlist.
 
-To get a better picture of the data, let's create a second plot that limits the y-axis from 0.0 to 0.2. 
-
-The first plot is very interesting. As one can see, there is an extremely high concentration of playlists at the very bottom of the plot, indicating a few things. First, that most playlists in our data set simply don't contain a lot of "speechy" tracks. Secondly, it indicates that most of the playlists with higher follower counts (particularly those with very high counts towards the right side of the plot) have very little "speechy" tracks. According to Spotify's documentation, this means that playlists with tracks like talk shows, podcasts, etc. likely don't have a very high follower count. With that being said, there are a few outliers on the graph that have speechiness values close to 1.0, which means these playlists are likely collections of podcasts, talk shows, etc. and don't contain actual music.
-
-The second plot, which limits the y-axis to a smaller range of values, shows us a very high concentration of high follower count playlists have an average track speechiness value between 0.0 and 0.05, which is very low. According to Spotify's documentation, this means that the tracks have almost no spoken words and are always music.  
+We can see that the points in the plot are mostly concentrated in the bottom-right hand corner of the plot. This means that most playlists with higher follower counts contain tracks with very low speechiness values. According to Spotify's documentation, lower speechiness values correlate to tracks that are more musical rather than things like podcasts, audiobooks, etc.
 ```{r}
 plot(
   x = log(aggregateDF$followers),
@@ -202,45 +298,113 @@ plot(
   xlab = "Number of followers (logarithmic)",
   main = "Follower counts vs. speechiness"
 )
-plot(
-  x = log(aggregateDF$followers),
-  y = aggregateDF$speechiness,
-  ylab = "Average Speechiness",
-  xlab = "Number of followers (logarithmic)",
-  main = "Follower counts vs. speechiness",
-  ylim = c(0.0, 0.2)
-)
 ```
 
-Finally, let's create a plot for tempo vs. follower count (again, in a logarithmic base). The x-axis here will be the follower count, and the y-axis will be the average tmepo for that playlist.
+To close out the linear regression modeling, let's create an ideal model using the significant variables from our original model. Again, this model includes the statistically significant variables from the model above, which contained all variables. We'll then use the model we build to predict follower counts using the `predict()` function (which will be run against the test set). 
+```{r}
+idealLinearModelPred <- predict(idealLinearModel, modelFrames$test)
 
-Another interesting plot here. One can see that almost all of the playlists in our data set are concentrated between the 100 and 150 tempo mark, with an increasingly higher concentration towards the right of the graph, indicating higher follower counts. We'll again create a second plot that limits the y-axis between 100 and 150 to get a better picture.
+lrRMSE <- print(paste("RMSE:", sqrt(mean((idealLinearModelPred - modelFrames$test$followers)^2))))
+lrMAE <- print(paste("MAE:", mean(abs(idealLinearModelPred - modelFrames$test$followers))))
+```
 
-The second plot shows a high concentration of playlists towards the right and around the 120 - 130 tempo mark. According to Spotify's documentation, this means these tracks have a beats per minute (BPM) of 120 - 130, telling us that playlists with higher follower counts tend to have tracks with tempo values in this range. 
+## k-Nearest Neighbors
+The k-nearest neighors (kNN) algorithm for regression attempts to output a predicted value (in our case, of follower counts for a playlist) based on distances between variables in the regression model. We'll run a kNN regression across all variables in our data set to predict the logarithmic follower count for playlists. As usual, the model will be trained using the training set, and a prediction will be run on the test data set to see how accurate the model is.
+
+The algorithm finds an optimal k-value of 43. This value of k was determined by the algorithm as the optimal k-value after performing cross validation across several different possible k-values. This k-value leads to the smallest amount of error in predicting the correct follower count.
+```{r}
+set.seed(100)
+knnModel <- train(
+  log(followers) ~ danceability + energy + integer_key + loudness + mode + speechiness + instrumentalness + liveness + valence + tempo + duration_in_ms, 
+  data = modelFrames$train, 
+  method = "knn", 
+  trControl = trainControl(method = "repeatedcv", number = 5), 
+  tuneLength = 20 # a reasonable value for tuning 
+)
+
+knnModel
+plot(knnModel)
+
+knnPredict <- predict(knnModel, modelFrames$test)
+knnRMSE <- print(paste("RMSE:", sqrt(mean((knnPredict - modelFrames$test$followers)^2))))
+knnMAE <- print(paste("MAE:", mean(abs(knnPredict - modelFrames$test$followers))))
+```
+
+## Random Forest
+The random forest algorithm for regression attempts to predict some output (in our case, of follower counts for a playlist) by binning predicted data by creating a tree. The random forest's leaf nodes become the predicted value. Random forests are especially useful for and good predictors with non-categorical features (like the follower counts that we are working with).
+
+To run this algorithm, we will create a random forest with 100 trees, and also analyze the "importantance" of each variable, meaning how critical its inclusion is to creating a better predicting tree. 
+
+The random forest finds that the three most important variables are: 1) duration_in_ms, 2) danceability, and 3) valence. This is an interesting result, given the context of our linear regression model, which also found that danceability and valence are significant. Although unlike the linear regression, which found speechiness to be significant, the random forest found duration of a song to be the most "important" variable. 
+```{r}
+set.seed(100)
+randomForestModel <- randomForest(
+  log(followers) ~ danceability + energy + integer_key + loudness + mode + speechiness + instrumentalness + liveness + valence + tempo + duration_in_ms, 
+  data = modelFrames$train, 
+  importance = TRUE,
+  ntree = 100
+)
+
+randomForestModel
+plot(randomForestModel)
+
+randomForestModelImportance <- as.data.frame(sort(
+  importance(randomForestModel)[, 1],
+  decreasing = TRUE),
+  optional = TRUE
+)
+print(randomForestModelImportance)
+
+randomForestPredict <- predict(randomForestModel, modelFrames$test)
+randomForestRSME <- print(paste("RSME:", sqrt(mean((randomForestPredict - modelFrames$test$followers)^2))))
+randomForestMAE <- print(paste("MAE:", mean(abs(randomForestPredict - modelFrames$test$followers))))
+```
+
+Let's analyze each of the models we built, and create some plots to help us better visualize the actual vs. predicted values.
+
+First, for linear regression, we calculated a RMSE of 359424 and a MAE of 166601. These values are significantly higher than our baseline model. kNN calculated a RMSE of 400161 and a MAE of 186819. These values are even higher than our baseline model. Finally, the random forest algorithm calculated a RMSE of 400161 and a MAE of 186819, which is essentially identical to the kNN algorithm values. Thus, we can assume that the linear regression model for predicting follower counts based on audio track features is the best predicting model out of the three tested here, since it has the lowest EMSE and MAE.
+
+Let's create some plots to better visualize this. We'll create three plots, each compare the logarithmic follower count to the respective prediction model.
 ```{r}
 plot(
-  x = log(aggregateDF$followers),
-  y = aggregateDF$tempo,
-  ylab = "Average Speechiness",
-  xlab = "Number of followers (logarithmic)",
-  main = "Follower counts vs. tempo"
+  idealLinearModelPred, 
+  log(modelFrames$test$followers),
+  xlab = "Predicted",
+  ylab = "Actual",
+  main = "Linear Regression Predicted vs. Actual"
 )
+abline(
+  a = 0,
+  b = 1
+)
+
 plot(
-  x = log(aggregateDF$followers),
-  y = aggregateDF$tempo,
-  ylab = "Average Speechiness",
-  xlab = "Number of followers (logarithmic)",
-  main = "Follower counts vs. tempo",
-  ylim = c(100, 150)
+  knnPredict, 
+  log(modelFrames$test$followers),
+  xlab = "Predicted",
+  ylab = "Actual",
+  main = "kNN Predicted vs. Actual"
+)
+abline(
+  a = 0,
+  b = 1
+)
+
+plot(
+  randomForestPredict, 
+  log(modelFrames$test$followers),
+  xlab = "Predicted",
+  ylab = "Actual",
+  main = "Random Forest Predicted vs. Actual"
+)
+abline(
+  a = 0,
+  b = 1
 )
 ```
 
-To close out the linear regression modeling, let's create an ideal model using the significant variables from our original model.
-```{r}
-idealLinearModel <- lm(
-  formula = followers ~ danceability + speechiness + valence + tempo,
-  data = aggregateDF
-)
+As expected with the data, the random forest and kNN plots are essentially identical, with only minor differences between predictions. As you can see with the trendline, both are not great at predicting follower counts with many data points below and above the trendline. 
 
-summary(idealLinearModel)
-```
+The more interesting graph is the linear regression plot. The plot above shows significantly more playlists sitting towards the trendline, which means that the linear regression model was able to more accurately predict their follower counts. The linear regression model seems to still have failed significantly on playlists that very high follower counts, as seen by the few outliers in the top and bottom right hand sides of the plot, but was able to do a relatively good job at predicting playlist follower counts in the low-to-medium range. 
+
+## Conclusion
